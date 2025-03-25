@@ -1,0 +1,28 @@
+{
+  "name": "kvs-electron-poc",
+  "version": "1.0.0",
+  "main": "main.js",
+  "type": "module",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build": "webpack",
+    "start": "electron ."
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@aws-sdk/client-kinesis-video": "^3.772.0",
+    "@aws-sdk/client-kinesis-video-archived-media": "^3.772.0",
+    "@aws-sdk/client-kinesis-video-signaling": "^3.772.0",
+    "@aws-sdk/client-kinesis-video-webrtc-storage": "^3.772.0",
+    "amazon-kinesis-video-streams-webrtc": "^2.3.2",
+    "electron": "^35.0.3"
+  },
+  "devDependencies": {
+    "webpack": "^5.98.0",
+    "webpack-cli": "^6.0.1",
+    "webpack-node-externals": "^3.0.0"
+  }
+}
