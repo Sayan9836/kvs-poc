@@ -16,7 +16,7 @@
     "@aws-sdk/client-kinesis-video": "^3.772.0",
     "@aws-sdk/client-kinesis-video-archived-media": "^3.772.0",
     "@aws-sdk/client-kinesis-video-signaling": "^3.772.0",
-    "@aws-sdk/client-kinesis-video-webrtc-storage": "^3.772.0",
+    "@aws-sdk/client-kinesis-video-webrtc-storage": "^3.774.0",
     "amazon-kinesis-video-streams-webrtc": "^2.3.2",
     "electron": "^35.0.3"
   },

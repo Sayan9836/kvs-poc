@@ -1,7 +1,7 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
 import { GetIceServerConfigCommand, KinesisVideoSignalingClient } from "@aws-sdk/client-kinesis-video-signaling";
-
-import { DescribeSignalingChannelCommand, GetDataEndpointCommand, GetSignalingChannelEndpointCommand, KinesisVideoClient } from "@aws-sdk/client-kinesis-video";
+import { KinesisVideoWebRTCStorageClient, JoinStorageSessionCommand } from "@aws-sdk/client-kinesis-video-webrtc-storage";
+import { DescribeSignalingChannelCommand, GetDataEndpointCommand, GetSignalingChannelEndpointCommand, KinesisVideoClient, UpdateMediaStorageConfigurationCommand } from "@aws-sdk/client-kinesis-video";
 import { GetHLSStreamingSessionURLCommand, KinesisVideoArchivedMediaClient } from "@aws-sdk/client-kinesis-video-archived-media";
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -43,15 +43,40 @@ async function createWindow() {
   await mainWindow.loadFile('index.html');
 }
 
+async function updateMediaStorageConfiguration() {
+  const input = {
+    ChannelARN: config.channelARN,
+    MediaStorageConfiguration: {
+      Status: "ENABLED",          
+      StreamARN: config.streamArn 
+    }
+  };
+
+  const command = new UpdateMediaStorageConfigurationCommand(input);
+  try {
+    const response = await kvClient.send(command);
+    console.log("Media storage configuration updated successfully:", response);
+  } catch (error) {
+    console.error("Error updating media storage configuration:", error);
+  }
+}
+
+const sharableObj = {
+  endpointsByProtocol: null
+}
+
 
 ipcMain.handle('get-signaling-channel-endpoint', async () => {
   const input = {
     ChannelARN: config.channelARN,
     SingleMasterChannelEndpointConfiguration: {
-        Protocols: ['WSS', 'HTTPS'],
-        Role: "MASTER",
+      Protocols: ['WSS', 'HTTPS', 'WEBRTC'],
+      Role: "MASTER",
     },
+
   };
+
+  await updateMediaStorageConfiguration()
   
   const command = new GetSignalingChannelEndpointCommand(input);
   
@@ -63,9 +88,53 @@ ipcMain.handle('get-signaling-channel-endpoint', async () => {
     return endpoints;
   }, {});
 
+  sharableObj.endpointsByProtocol = endpointsByProtocol;
+
   return endpointsByProtocol;
 })
-// IPC Handlers
+
+ipcMain.handle('connect-to-media-server', async (channelEndpoints) =>  {
+  const storageClient = new KinesisVideoWebRTCStorageClient({
+    region: config.region,
+    credentials: {
+      accessKeyId: config.accessKeyId,
+      secretAccessKey: config.secretAccessKey,
+    },
+    endpoint: sharableObj.endpointsByProtocol.WEBRTC,
+    maxAttempts: 1
+  });
+
+  let retries = 0;
+  const maxRetries = 5;
+  let sdpOfferReceived = false;
+
+  while (!sdpOfferReceived && retries < maxRetries) {
+    try {
+      console.log(`[MASTER] Attempting to join storage session (attempt ${retries + 1}).`);
+      
+      const command = new JoinStorageSessionCommand({
+        channelArn: config.channelARN,
+      });
+      
+      const response = await storageClient.send(command);
+      console.log('[MASTER] joinStorageSession response:', response);
+      
+      await new Promise(resolve => setTimeout(resolve, 5000));
+      
+      sdpOfferReceived = true;
+      console.log('[MASTER] Joined storage session successfully.');
+    } catch (error) {
+      console.error('[MASTER] joinStorageSession error:', error);
+      retries++;
+      await new Promise(resolve => setTimeout(resolve, 6000));
+    }
+  }
+
+  if (!sdpOfferReceived) {
+    console.error('[MASTER] Failed to join storage session after maximum retries.');
+  }
+})
+
 ipcMain.handle('get-ice-servers', async (endpointsByProtocol) => {
 
   const signalingClient = new KinesisVideoSignalingClient({
@@ -74,7 +143,7 @@ ipcMain.handle('get-ice-servers', async (endpointsByProtocol) => {
       accessKeyId: config.accessKeyId,
       secretAccessKey: config.secretAccessKey
     },
-    endpoint:  endpointsByProtocol.HTTPS
+    endpoint:  endpointsByProtocol.HTTPS,
   });
   try {
     // Use the v3 command to describe the signaling channel.
@@ -114,45 +183,6 @@ ipcMain.handle('get-ice-servers', async (endpointsByProtocol) => {
     throw error;
   }
 });
-
-// ipcMain.handle('get-hls-url', async () => {
-//   try {
-//     // const dataEndpoint = await kvClient.getDataEndpoint({
-//     //   StreamName: config.streamName,
-//     //   APIName: "GET_HLS_STREAMING_SESSION_URL"
-//     // });
-
-//     const archivedMediaClient = new KinesisVideoArchivedMediaClient({
-//       // endpoint: dataEndpoint.DataEndpoint,
-//       region: config.region,
-//       credentials: {
-//         accessKeyId: config.accessKeyId,
-//         secretAccessKey: config.secretAccessKey
-//       }
-//     });
-
-//     const command = new GetHLSStreamingSessionURLCommand({
-//       StreamName: config.streamName,
-//       PlaybackMode: "ON_DEMAND",
-//       Expires: 3600,
-//       // HLSFragmentSelector: {
-//       //   FragmentSelectorType: "SERVER_TIMESTAMP",
-//       //   TimestampRange: {
-//       //     StartTimestamp: new Date(Date.now() - 60 * 1000),
-//       //     EndTimestamp: new Date()
-//       //   }
-//       // }
-//     });
-
-//     const response = await archivedMediaClient.send(command);
-//     console.log('response => ', response)
-//     console.log('HLS URL:', response.HLSStreaming)
-//     return response.HLSStreamingSessionURL;
-//   } catch (error) {
-//     console.error('Error getting HLS URL:', error);
-//     throw error;
-//   }
-// });
 
 ipcMain.handle('get-hls-url', async () => {
   try {
@@ -199,6 +229,7 @@ ipcMain.handle('get-hls-url', async () => {
     throw error;
   }
 });
+
 app.whenReady().then(createWindow);
 
 app.on('window-all-closed', () => {

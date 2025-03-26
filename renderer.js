@@ -226,8 +226,12 @@ async function startStreaming() {
   try {
     // --- 1. Get Local Media Stream ---
     localStream = await navigator.mediaDevices.getUserMedia({
-      video: { width: { ideal: 1280 }, height: { ideal: 720 } },
-      audio: true,
+      video: { 
+        width: { ideal: 1280 },
+        height: { ideal: 720 },
+        frameRate: { ideal: 30 }
+      },
+      audio: true
     });
     localVideo.srcObject = localStream;
 
@@ -235,11 +239,21 @@ async function startStreaming() {
 
     const iceServers = await window.electronAPI.getIceServers(channelEndpoints);
 
+
+
     // --- 4. Create RTCPeerConnection ---
-    peerConnection = new RTCPeerConnection({ iceServers, iceTransportPolicy: 'all' });
+
+    peerConnection = new RTCPeerConnection({ 
+      iceServers,
+      iceTransportPolicy: 'all',
+      bundlePolicy: 'max-bundle',
+      rtcpMuxPolicy: 'require'
+    });
 
     localStream.getTracks().forEach(track => {
+      
       if (peerConnection && localStream) {
+        console.log('track => ', track)
         peerConnection.addTrack(track, localStream);
       }
     });
@@ -247,8 +261,8 @@ async function startStreaming() {
     console.log('peerConnection => ', peerConnection)
 
     // --- 5. Create Signaling Client ---
-    // const clientId = generateClientId(); // Generate a unique client ID for this viewer
-    signalingClient = new window.KVSWebRTC.SignalingClient({  // Use window.KVSWebRTC
+
+    signalingClient = new window.KVSWebRTC.SignalingClient({ 
       channelARN: config.channelARN,
       channelEndpoint: channelEndpoints.WSS,
       clientId: null,    
@@ -258,7 +272,8 @@ async function startStreaming() {
         accessKeyId: config.accessKeyId,
         secretAccessKey: config.secretAccessKey,
       },
-      systemClockOffset: 0
+      systemClockOffset: 0,
+      useTrickleIce: true
       // systemClockOffset: kinesisVideoClient.config.systemClockOffset, //  Important for synchronization
     });
 
@@ -268,9 +283,13 @@ async function startStreaming() {
 
     peerConnection.onicecandidate = ({ candidate }) => {
       if (candidate && signalingClient) {
-        console.log('sending ice candidate')
+        console.log('Sending ICE candidate to viewer');
         signalingClient.sendIceCandidate(candidate);
       }
+    };
+
+    peerConnection.onconnectionstatechange = () => {
+      console.log('Connection state:', peerConnection.connectionState);
     };
 
     peerConnection.oniceconnectionstatechange = () => {
@@ -279,6 +298,10 @@ async function startStreaming() {
 
     signalingClient.on('open', async () => {
       console.log('signaling service opened');
+
+      await window.electronAPI.connectToMediaServer()
+
+      // await joinStorageSession(channelEndpoints);
 
       // try {
       //     const offer = await peerConnection.createOffer({
@@ -297,22 +320,27 @@ async function startStreaming() {
 
     });
 
+
     signalingClient.on('sdpOffer', async (offer) => {
-      console.log('[MASTER] Received SDP offer from viewer:', offer);
-      await peerConnection.setRemoteDescription(offer);
-      const answer = await peerConnection.createAnswer();
-      await peerConnection.setLocalDescription(answer);
-      console.log('[MASTER] Sending SDP answer:', answer);
-      signalingClient.sendSdpAnswer(answer);
+      console.log('[MASTER] Received SDP offer from viewer'); 
+      try {
+        await peerConnection.setRemoteDescription(offer);
+        const answer = await peerConnection.createAnswer();
+        await peerConnection.setLocalDescription(answer);
+        console.log('[MASTER] Sending SDP answer');
+        signalingClient.sendSdpAnswer(answer);
+      } catch (error) {
+        console.error('[MASTER] Error handling SDP offer:', error);
+      }
     });
 
-    // signalingClient.on('sdpAnswer', async (answer) => {
-    //   await peerConnection.setRemoteDescription(answer);
-    // });
-
-    signalingClient.on('iceCandidate', (candidate) => {
-      console.log('receiving ice candidate')
-      peerConnection.addIceCandidate(candidate);
+    signalingClient.on('iceCandidate', async (candidate) => {
+      try {
+        console.log('[MASTER] Adding ICE candidate from viewer');
+        await peerConnection.addIceCandidate(candidate);
+      } catch (error) {
+        console.error('[MASTER] Error adding ICE candidate:', error);
+      }
     });
 
     signalingClient.on('close', () => {
@@ -325,39 +353,48 @@ async function startStreaming() {
 
     // --- 7. Peer Connection Event Handlers ---
 
-    // Send ICE candidates to the MASTER
-    // peerConnection.addEventListener('icecandidate', ({ candidate }) => {
-    //   if (candidate) {
-    //     console.log('[VIEWER] Sending ICE candidate', candidate);
-    //     signalingClient.sendIceCandidate(candidate);
-    //   } else {
-    //     console.log('[VIEWER] All ICE candidates have been sent');
-    //   }
-    // });
+      // Send ICE candidates to the MASTER
+      // peerConnection.addEventListener('icecandidate', ({ candidate }) => {
+      //   if (candidate) {
+      //     console.log('[VIEWER] Sending ICE candidate', candidate);
+      //     signalingClient.sendIceCandidate(candidate);
+      //   } else {
+      //     console.log('[VIEWER] All ICE candidates have been sent');
+      //   }
+      // });
 
-    // When a remote track arrives, add it to the remote video element
-      peerConnection.addEventListener('track', (event) => {
-        console.log('[VIEWER] Received remote track');
-        if (remoteVideo.srcObject) {
-          return; // Already have a remote stream
+      // When a remote track arrives, add it to the remote video element
+      // peerConnection.addEventListener('track', (event) => {
+      //   console.log('[VIEWER] Received remote track');
+      //   if (remoteVideo.srcObject) {
+      //     return; // Already have a remote stream
+      //   }
+      //   remoteVideo.srcObject = event.streams[0];
+      // });
+
+      peerConnection.ontrack = (event) => {
+        console.log('Received remote track:', event.track.kind);
+        if (remoteVideo && event.streams && event.streams[0]) {
+          remoteVideo.srcObject = event.streams[0];
+          remoteVideo.play().catch(err => console.log('Remote video playback error:', err));
         }
-        remoteVideo.srcObject = event.streams[0];
-      });
+      };
 
       // --- 8. Open Signaling Connection ---
       console.log('Opening signaling connection');
       signalingClient.open()
 
       // Update UI
-      startButton.disabled = true;
-      stopButton.disabled = false;
+      if (startButton) startButton.disabled = true;
+      if (stopButton) stopButton.disabled = false;
 
   } catch (error) {
     console.error('[VIEWER] Error in startStreaming:', error);
     alert('Error starting streaming: ' + error.message);
   }
 }
-// Function to stop streaming and clean up resources.
+
+
 async function stopStreaming() {
   if (peerConnection) {
     peerConnection.close();
@@ -377,8 +414,6 @@ async function stopStreaming() {
   }
 }
 
-// Function to play the recorded (archived) video via HLS.
-// This part uses the HLS URL retrieved via IPC.
 async function playRecording() {
   try {
     const hlsUrl = await window.electronAPI.getHlsUrl();
