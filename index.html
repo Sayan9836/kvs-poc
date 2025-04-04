@@ -1,11 +1,11 @@
+
 <!DOCTYPE html>
 <html>
   <head>
     <title>KVS Electron PoC</title>
-    <!-- <meta http-equiv="Content-Security-Policy" content="default-src 'self' https: 'unsafe-inline' 'unsafe-eval'"> -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self' https:; connect-src 'self' https: wss://m-3bffc0cd.kinesisvideo.ap-south-1.amazonaws.com; style-src 'self' 'nonce-ABC123';">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' https:; connect-src 'self' https: wss://*.amazonaws.com; script-src 'self' https://cdn.jsdelivr.net https://unpkg.com; style-src 'self' 'nonce-ABC123'">
     <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
-    <script src="https://unpkg.com/amazon-kinesis-video-streams-webrtc/dist/kvs-webrtc.min.js"></script>
+    <script src="./node_modules/amazon-kinesis-video-streams-webrtc/dist/kvs-webrtc.min.js"></script>
     <style nonce="ABC123">
       video { width: 320px; height: 240px; border: 1px solid black; margin: 10px; }
     </style>
